@@ -1,5 +1,6 @@
-.exe
-.map
-.ovl
-.tr
-.obj
+*.exe
+*.obj
+*.map
+*.ovl
+*.tr
+*.td
