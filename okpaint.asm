@@ -6,15 +6,15 @@ MODEL small
 STACK 100h
 DATASEG
 	; Holds the value of the welcome message
-	welcome db 13,10,13,10,13,10
-			db '      ________  ___  __    ________  ________  ___  ________   __________',13,10
-			db '     |\   __  \|\  \|\  \ |\   __  \|\   __  \|\  \|\   ___  \|\___   ___\ ',13,10
-			db '     \ \  \|\  \ \  \/  /|\ \  \|\  \ \  \|\  \ \  \ \  \\ \  \|___ \  \_|',13,10
-			db '      \ \  \\\  \ \   ___  \ \   ____\ \   __  \ \  \ \  \\ \  \   \ \  \ ',13,10
-			db '       \ \  \\\  \ \  \\ \  \ \  \___|\ \  \ \  \ \  \ \  \\ \  \   \ \  \ ',13,10
-			db '        \ \_______\ \__\\ \__\ \__\    \ \__\ \__\ \__\ \__\\ \__\   \ \__\ ',13,10
-			db '         \|_______|\|__| \|__|\|__|     \|__|\|__|\|__|\|__| \|__|    \|__|',13,10, 13,10,13,10,13,10
-			db '                              Enter to continue...',13,10,'$'
+	welcome db 13, 10, 13, 10, 13, 10
+			db '      ________  ___  __    ________  ________  ___  ________   __________', 13, 10
+			db '     |\   __  \|\  \|\  \ |\   __  \|\   __  \|\  \|\   ___  \|\___   ___\ ', 13, 10
+			db '     \ \  \|\  \ \  \/  /|\ \  \|\  \ \  \|\  \ \  \ \  \\ \  \|___ \  \_|', 13, 10
+			db '      \ \  \\\  \ \   ___  \ \   ____\ \   __  \ \  \ \  \\ \  \   \ \  \ ', 13, 10
+			db '       \ \  \\\  \ \  \\ \  \ \  \___|\ \  \ \  \ \  \ \  \\ \  \   \ \  \ ', 13, 10
+			db '        \ \_______\ \__\\ \__\ \__\    \ \__\ \__\ \__\ \__\\ \__\   \ \__\ ', 13, 10
+			db '         \|_______|\|__| \|__|\|__|     \|__|\|__|\|__|\|__| \|__|    \|__|', 13, 10, 13, 10, 13, 10, 13, 10
+			db '                              Enter to continue...', 13, 10, '$'
 	
 	; Holds the color code of the current chosen color
 	; The color can be chosen programmatically by the developer or by the user
@@ -228,20 +228,24 @@ proc DisplayEraser
 endp DisplayEraser
 
 
-; Displays the escape button
-; Displays two blocks that make up the escape button using DisplayRectangle
-proc DisplayEscape
+; Displays the options bar
+; Displays each block that makes up the options bar using DisplayRectangle
+; The blocks are currently:
+; 1) Escape button
+; 2) Clear screen button
+proc DisplayOptionsBar
 	mov [color], 7
 
 	mov [startX], 0
 	mov [startY], 0
 
-	mov [endX], 20
+	mov [endX], 320
 	mov [endY], 20
 
 	call DisplayRectangle
 
-	mov [color], 8
+	; Escape Button
+	mov [color], 4
 
 	mov [startX], 5
 	mov [startY], 5
@@ -251,8 +255,19 @@ proc DisplayEscape
 
 	call DisplayRectangle
 
+	; Clear Screen Button
+	mov [color], 0Fh
+
+	mov [startX], 20
+	mov [startY], 5
+
+	mov [endX], 30
+	mov [endY], 15
+
+	call DisplayRectangle
+
 	ret
-endp DisplayEscape
+endp DisplayOptionsBar
 
 
 ; Switches the current color
@@ -335,11 +350,11 @@ GetMouseLoop:
 
 	shr cx, 1
 
-	cmp dx, 159
-	ja SwitchColorClicked
+	cmp dx, 160
+	jae SwitchColorClicked
 
-	cmp cx, 21
-	jb LeftPartClicked
+	cmp dx, 20
+	jbe TopPartClicked
 
 DisplayPaintedRegtangle:
 	sub cx, 1
@@ -361,11 +376,34 @@ SwitchColorClicked:
 	call SwitchColor
 	jmp GetMouseLoop
 
-LeftPartClicked:
-	cmp dx, 21
-	jb EscapeClicked
+TopPartClicked:
+	cmp cx, 15
+	jbe EscapeClicked
 
-	jmp DisplayPaintedRegtangle
+	cmp cx, 30
+	jbe ClearScreenClicked
+
+	jmp GetMouseLoop
+
+ClearScreenClicked:
+	mov ah, 0
+	mov al, [color]
+
+	push ax
+		mov [color], 0Fh
+
+		mov [startX], 0
+		mov [endX], 320
+
+		mov [startY], 20
+		mov [endY], 160
+
+		call DisplayRectangle
+	pop ax
+
+	mov [color], al
+
+	jmp GetMouseLoop
 
 EscapeClicked:
 	call SwitchToTextMode
@@ -382,7 +420,7 @@ Start:
 	
 	call SwitchToGraphicsMode
 	call ClearScreen
-	call DisplayEscape
+	call DisplayOptionsBar
 	call DisplayColors
 	call DisplayEraser
 	call InitMouse
