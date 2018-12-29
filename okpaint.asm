@@ -16,6 +16,11 @@ DATASEG
 			db '         \|_______|\|__| \|__|\|__|     \|__|\|__|\|__|\|__| \|__|    \|__|', 13, 10, 13, 10, 13, 10, 13, 10
 			db '                              Enter to continue...', 13, 10, '$'
 	
+	; Holds the value of the title of the program
+	; The title is displayed in the top bar of the program
+	; Must end with '$'
+	okpaintTitle db 'OKPaint$'
+
 	; Holds the color code of the current chosen color
 	; The color can be chosen programmatically by the developer or by the user
 	; Optional values are 0h - 0Fh
@@ -31,6 +36,19 @@ DATASEG
 	; Represents the bottom right point of the rectangle
 	endX dw 0
 	endY dw 0
+
+	; char, charRow and charColumn are used in the DisplayChar procedure 
+
+	; char is the char needed to be displayed
+	char db 0
+
+	; charRow and charColumn represent the location of the char
+	charRow db 0
+	charColumn db 0
+
+	; Holds the color code of the char color to be displayed
+	; Optional values are 0h - 0Fh
+	charColor db 0
 	
 CODESEG
 ; Prints the welcome message to the screen
@@ -94,42 +112,7 @@ proc DisplayDot
 endp DisplayDot
 
 
-; Displays a line in the length of the whole screen
-proc DisplayFullLine
-DisplayDotLoop:
-	call DisplayDot
-	inc cx
-	
-	cmp cx, 320
-	jne DisplayDotLoop
-	
-	mov cx, 0
-	inc dx
-	
-	ret
-endp DisplayFullLine
-
-
-; Clears the screen
-; Loops over all the pixels and makes them white line by line using DisplayFullLine procedure
-proc ClearScreen
-	mov [color], 0Fh
-
-	mov cx, 0
-	mov dx, 0
-	
-DisplayLineLoop:
-	call DisplayFullLine
-	
-	cmp dx, 200
-	jne DisplayLineLoop
-
-	mov dx, 0
-	ret
-endp ClearScreen
-
-
-; Inits the mouse and displays a cursor
+; Initializes the mouse and displays a cursor
 proc InitMouse
 	mov ax, 0
 	int 33h
@@ -174,6 +157,58 @@ DisplayLineOnScreen:
 
 	ret
 endp DisplayRectangle
+
+
+; Displays a char
+; Char should be in the char variable
+; Row and column should be in the charRow and charColumn variables
+; Char color should be in the charColor variable
+proc DisplayChar
+	mov ah, 3
+	mov bh, 0
+
+	int 10h
+
+	push dx
+		mov ah, 2
+
+		mov dh, [charRow]
+		mov dl, [charColumn]
+
+		int 10h
+
+		mov ah, 9
+
+		mov al, [char]
+		mov bl, [charColor]
+
+		mov cx, 1
+
+		int 10h
+	pop dx
+
+	mov ah, 2
+	int 10h
+
+	ret
+endp DisplayChar
+
+
+; Clears the screen
+; Displays a white area in the drawing area
+proc ClearScreen
+	mov [color], 0Fh
+
+	mov [startX], 0
+	mov [endX], 320
+
+	mov [startY], 20
+	mov [endY], 160
+
+	call DisplayRectangle
+
+	ret
+endp ClearScreen
 
 
 ; Displays the list of the optional 7 color
@@ -228,13 +263,45 @@ proc DisplayEraser
 endp DisplayEraser
 
 
+; Displays the title of the program in the options bar
+; The title is taken from the okpaintTitle variable, which must end with '$'
+proc DisplayTitle
+	lea bx, [okpaintTitle]
+	mov al, 3
+
+	mov [charRow], 1
+	mov [charColor], 0Fh
+
+DisplayCharLoop:
+	mov ah, [byte ptr bx]
+	mov [char], ah
+
+	mov [charColumn], al
+
+	push bx
+		push ax
+			call DisplayChar
+		pop ax
+	pop bx
+
+	inc al
+	inc bx
+
+	cmp [byte ptr bx], '$'
+	jne DisplayCharLoop
+
+	ret
+endp DisplayTitle
+
+
 ; Displays the options bar
 ; Displays each block that makes up the options bar using DisplayRectangle
 ; The blocks are currently:
 ; 1) Escape button
 ; 2) Clear screen button
 proc DisplayOptionsBar
-	mov [color], 7
+	; mov [color], 7 - gray
+	mov [color], 0
 
 	mov [startX], 0
 	mov [startY], 0
@@ -255,13 +322,16 @@ proc DisplayOptionsBar
 
 	call DisplayRectangle
 
+	; OKPaint Title
+	call DisplayTitle
+
 	; Clear Screen Button
 	mov [color], 0Fh
 
-	mov [startX], 20
+	mov [startX], 305
 	mov [startY], 5
 
-	mov [endX], 30
+	mov [endX], 315
 	mov [endY], 15
 
 	call DisplayRectangle
@@ -380,8 +450,8 @@ TopPartClicked:
 	cmp cx, 15
 	jbe EscapeClicked
 
-	cmp cx, 30
-	jbe ClearScreenClicked
+	cmp cx, 305
+	jae ClearScreenClicked
 
 	jmp GetMouseLoop
 
@@ -390,15 +460,7 @@ ClearScreenClicked:
 	mov al, [color]
 
 	push ax
-		mov [color], 0Fh
-
-		mov [startX], 0
-		mov [endX], 320
-
-		mov [startY], 20
-		mov [endY], 160
-
-		call DisplayRectangle
+		call ClearScreen
 	pop ax
 
 	mov [color], al
