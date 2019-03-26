@@ -21,9 +21,14 @@ DATASEG
 	; Must end with '$'
 	okpaintTitle db 'OKPaint$'
 
+	; Holds the value of the save button text
+	; This text is displayed in the top bar of the program
+	; Must end with '$'
+	saveButtonText db 'Save$'
+
 	; Holds the color code of the current chosen color
 	; The color can be chosen programmatically by the developer or by the user
-	; Optional values are 0h - 0Fh
+	; Optional values are 0 - 255
 	color db 0
 	
 	; startX, startY, endX and endY are used in the DisplayRectangle procedure
@@ -270,6 +275,12 @@ proc LoadImage
 endp LoadImage
 
 
+; Saves the current screen into [filehandler]
+proc SaveImage
+	ret
+endp SaveImage
+
+
 ; Displays a line
 ; Starts at the variable startX and ends in endX
 ; Height should be stored at dx
@@ -385,7 +396,7 @@ endp DisplayColors
 ; Displays the eraser
 ; Displays two blocks that make up the eraser using DisplayRectangle
 proc DisplayEraser
-	mov [color], 9
+	mov [color], 87
 
 	mov [startX], 0
 	mov [endX], 40
@@ -395,7 +406,7 @@ proc DisplayEraser
 
 	call DisplayRectangle
 
-	mov [color], 4
+	mov [color], 217
 
 	mov [startX], 0
 	mov [endX], 40
@@ -409,35 +420,45 @@ proc DisplayEraser
 endp DisplayEraser
 
 
-; Displays the title of the program in the options bar
-; The title is taken from the okpaintTitle variable, which must end with '$'
-proc DisplayTitle
-	lea bx, [okpaintTitle]
-	mov al, 3
+; Displays text in the top bar of the screen
+; The text you want to display must end with '$'
+; You should first push the address of the text and then the starting position
+proc DisplayText
+	textAddress equ [bp+6]
+	startingPlace equ [bp+4]
 
-	mov [charRow], 1
-	mov [charColor], 0Fh
+	push bp
+		mov bp, sp
 
-DisplayCharLoop:
-	mov ah, [byte ptr bx]
-	mov [char], ah
+		mov bx, textAddress
 
-	mov [charColumn], al
+		mov [charRow], 1
 
-	push bx
-		push ax
-			call DisplayChar
-		pop ax
-	pop bx
+		mov al, startingPlace
+		mov [charColor], 246
 
-	inc al
-	inc bx
+	DisplayCharLoop:
+		mov ah, [byte ptr bx]
+		mov [char], ah
 
-	cmp [byte ptr bx], '$'
-	jne DisplayCharLoop
+		mov [charColumn], al
 
-	ret
-endp DisplayTitle
+		push bx
+			push ax
+				call DisplayChar
+			pop ax
+		pop bx
+
+		inc al
+		inc bx
+
+		cmp [byte ptr bx], '$'
+		jne DisplayCharLoop
+
+	pop bp
+
+	ret 4
+endp DisplayText
 
 
 ; Displays the options bar
@@ -446,7 +467,6 @@ endp DisplayTitle
 ; 1) Escape button
 ; 2) Clear screen button
 proc DisplayOptionsBar
-	; mov [color], 7 - gray
 	mov [color], 0
 
 	mov [startX], 0
@@ -458,7 +478,7 @@ proc DisplayOptionsBar
 	call DisplayRectangle
 
 	; Escape Button
-	mov [color], 4
+	mov [color], 14
 
 	mov [startX], 5
 	mov [startY], 5
@@ -469,10 +489,19 @@ proc DisplayOptionsBar
 	call DisplayRectangle
 
 	; OKPaint Title
-	call DisplayTitle
+	push offset okpaintTitle
+	push 3
+
+	call DisplayText
+
+	; Save Button Text
+	push offset saveButtonText
+	push 33
+
+	call DisplayText
 
 	; Clear Screen Button
-	mov [color], 0Fh
+	mov [color], 246
 
 	mov [startX], 305
 	mov [startY], 5
@@ -513,7 +542,7 @@ proc SwitchColor
 	jmp Choose7
 
 Choose0:
-	mov [color], 0Fh
+	mov [color], 246
 	jmp EndSwitchColorProc
 
 Choose1:
@@ -599,6 +628,9 @@ TopPartClicked:
 	cmp cx, 305
 	jae ClearScreenClicked
 
+	cmp cx, 260
+	jae SaveImageClicked
+
 	jmp GetMouseLoop
 
 ClearScreenClicked:
@@ -611,6 +643,10 @@ ClearScreenClicked:
 
 	mov [color], al
 
+	jmp GetMouseLoop
+
+SaveImageClicked:
+	call SaveImage
 	jmp GetMouseLoop
 
 EscapeClicked:
