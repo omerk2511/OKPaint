@@ -49,6 +49,25 @@ DATASEG
 	; Holds the color code of the char color to be displayed
 	; Optional values are 0h - 0Fh
 	charColor db 0
+
+	; Holds the name of the image that is saved and loaded
+	imageName db 'image.bmp', 0
+
+	; Holds the file handler that is currently used for I/O operations
+	filehandler dw ?
+
+	; Holds the header of the BMP file
+	header db 54 dup (0)
+
+	; Holds the color palette of the BMP file
+	palette db 256*4 dup (0)
+
+	; Holds each screen line that is loaded from the BMP file
+	scrLine db 320 dup (0)
+
+	; Holds the error message
+	; This message is printed when there is an I/O exception
+	errorMsg db 'I/O Error. Please try again. Make sure that image.bmp exists.', 13, 10,'$'
 	
 CODESEG
 ; Prints the welcome message to the screen
@@ -122,6 +141,133 @@ proc InitMouse
 
 	ret
 endp InitMouse
+
+
+; Opens the file at [imageName]
+; The filehandler id is put at [filehandler]
+proc OpenFile
+	mov ah, 3Dh
+	xor al, al
+	lea dx, [imageName]
+
+	int 21h
+	jc OpenError
+
+	mov [filehandler], ax
+
+	ret
+
+OpenError:
+	mov dx, offset errorMsg
+	mov ah, 9h
+	int 21h
+
+	ret
+endp OpenFile
+
+
+; Reads the BMP file header from [filehandler] into [header]
+proc ReadHeader
+	mov ah, 3Fh
+	mov bx, [filehandler]
+	mov cx, 54
+	lea dx, [header]
+
+	int 21h
+
+	ret
+endp ReadHeader
+
+
+; Reads the BMP file header from [filehandler] into [palette]
+proc ReadPalette
+	mov ah, 3Fh
+	mov cx, 400h
+	lea dx, [palette]
+
+	int 21h
+
+	ret
+endp ReadPalette
+
+
+; Copies the color palette from [palette] into the video memory
+proc CopyPalette
+	lea si, [palette]
+	mov cx, 256
+	mov dx, 3C8h
+	xor al, al
+
+	out dx, al
+	inc dx
+
+PaletteLoop:
+	; Red
+	mov al, [si+2]
+	shr al, 2
+	out dx, al
+
+	; Green
+	mov al, [si+1]
+	shr al, 2
+	out dx, al
+
+	; Blue
+	mov al, [si]
+	shr al, 2
+	out dx, al
+
+	; Next color in the palette
+	add si, 4
+	loop PaletteLoop
+
+	ret
+endp CopyPalette
+
+
+; Displays the actual image that is loaded from [filehandler]
+; Displays line by line
+proc CopyBitmap
+	mov ax, 0A000h
+	mov es, ax
+	mov cx, 200
+
+PrintBMPLoop:
+	push cx
+		mov di, cx
+		shl cx, 6
+		shl di, 8
+		add di,cx
+		
+		mov ah, 3Fh
+		mov cx, 320
+		lea dx,[scrLine]
+
+		int 21h
+
+		cld
+		mov cx,320
+		lea si, [scrLine]
+		rep movsb
+	pop cx
+
+	loop PrintBMPLoop
+
+	ret
+endp CopyBitmap
+
+
+; Loads the image from [imageName] into the screen
+; Should be called when the program is first run to continue drawing from last use
+proc LoadImage
+	call OpenFile
+	call ReadHeader
+	call ReadPalette
+	call CopyPalette
+	call CopyBitmap
+
+	ret
+endp LoadImage
 
 
 ; Displays a line
@@ -481,7 +627,7 @@ Start:
 	call WaitForKey
 	
 	call SwitchToGraphicsMode
-	call ClearScreen
+	call LoadImage
 	call DisplayOptionsBar
 	call DisplayColors
 	call DisplayEraser
