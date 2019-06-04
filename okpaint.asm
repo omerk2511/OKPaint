@@ -21,9 +21,14 @@ DATASEG
 	; Must end with '$'
 	okpaintTitle db 'OKPaint$'
 
+	; Holds the value of the save button text
+	; This text is displayed in the top bar of the program
+	; Must end with '$'
+	saveButtonText db 'Save$'
+
 	; Holds the color code of the current chosen color
 	; The color can be chosen programmatically by the developer or by the user
-	; Optional values are 0h - 0Fh
+	; Optional values are 0 - 255
 	color db 0
 	
 	; startX, startY, endX and endY are used in the DisplayRectangle procedure
@@ -46,9 +51,45 @@ DATASEG
 	charRow db 0
 	charColumn db 0
 
+	; The x and y values of the pixel you want to read the color of
+	; Used in the ReadPixel procedure
+	xToRead dw ?
+	yToRead dw ?
+
+	; The color that was returned from the ReadPixel procedure
+	colorRead db ?
+
 	; Holds the color code of the char color to be displayed
 	; Optional values are 0h - 0Fh
 	charColor db 0
+
+	; Holds a line row that should be saved into the image
+	; Used in the SaveScreenLine procedure
+	lineToSave dw ?
+
+	; Holds the line that was read from the screen
+	; Holds color indexes
+	; Used in the SaveScreenLine procedure
+	readLine db 320 dup (0)
+
+	; Holds the name of the image that is saved and loaded
+	imageName db 'image.bmp', 0
+
+	; Holds the file handler that is currently used for I/O operations
+	filehandler dw ?
+
+	; Holds the header of the BMP file
+	header db 54 dup (0)
+
+	; Holds the color palette of the BMP file
+	palette db 256*4 dup (0)
+
+	; Holds each screen line that is loaded from the BMP file
+	scrLine db 320 dup (0)
+
+	; Holds the error message
+	; This message is printed when there is an I/O exception
+	errorMsg db 'I/O Error. Please try again. Make sure that image.bmp exists.', 13, 10,'$'
 	
 CODESEG
 ; Prints the welcome message to the screen
@@ -112,16 +153,269 @@ proc DisplayDot
 endp DisplayDot
 
 
-; Initializes the mouse and displays a cursor
+; Reads the color of a pixel at x=[xToRead] and y=[yToRead]
+; The color that is read is save to [colorRead]
+proc ReadPixel
+	mov bl, 0
+
+	mov cx, [xToRead]
+	mov dx, [yToRead]
+
+	mov ah, 0Dh
+	int 10h
+	
+	mov [colorRead], al
+
+	ret
+endp ReadPixel
+
+
+; Initializes the mouse
 proc InitMouse
 	mov ax, 0
 	int 33h
 
-	mov ax, 1
-	int 33h
-
 	ret
 endp InitMouse
+
+
+; Displays the cursor of the mouse
+proc DisplayMouse
+	mov ax, 1
+	int 33h
+	
+	ret
+endp DisplayMouse
+
+
+; Hides the cursor of the mouse
+proc HideMouse
+	mov ax, 2
+	int 33h
+	
+	ret
+endp HideMouse
+
+
+; Opens the file at [imageName]
+; The filehandler id is put at [filehandler]
+proc OpenFile
+	mov ah, 3Dh
+	mov al, 2
+	lea dx, [imageName]
+
+	int 21h
+
+	jc OpenError
+	mov [filehandler], ax
+
+	ret
+
+OpenError:
+	mov dx, offset errorMsg
+	mov ah, 9h
+	int 21h
+
+	ret
+endp OpenFile
+
+
+; Closes the file that was opened before at [filehandler]
+; Used at exit to close the image file
+proc CloseFile
+	mov ah, 3Eh
+	mov bx, [filehandler]
+	int 21h
+
+	ret
+endp CloseFile
+
+
+; Reads the BMP file header from [filehandler] into [header]
+proc ReadHeader
+	mov ah, 3Fh
+	mov bx, [filehandler]
+	mov cx, 54
+	lea dx, [header]
+
+	int 21h
+
+	ret
+endp ReadHeader
+
+
+; Reads the BMP color palette from [filehandler] into [palette]
+proc ReadPalette
+	mov ah, 3Fh
+	mov cx, 400h
+	lea dx, [palette]
+
+	int 21h
+
+	ret
+endp ReadPalette
+
+
+; Copies the color palette from [palette] into the video memory
+proc CopyPalette
+	lea si, [palette]
+	mov cx, 256
+	mov dx, 3C8h
+	xor al, al
+
+	out dx, al
+	inc dx
+
+PaletteLoop:
+	; Red
+	mov al, [si+2]
+	shr al, 2
+	out dx, al
+
+	; Green
+	mov al, [si+1]
+	shr al, 2
+	out dx, al
+
+	; Blue
+	mov al, [si]
+	shr al, 2
+	out dx, al
+
+	; Next color in the palette
+	add si, 4
+	loop PaletteLoop
+
+	ret
+endp CopyPalette
+
+
+; Displays the actual image that is loaded from [filehandler]
+; Displays line by line
+proc CopyBitmap
+	mov ax, 0A000h
+	mov es, ax
+	mov cx, 200
+
+PrintBMPLoop:
+	push cx
+		mov di, cx
+		shl cx, 6
+		shl di, 8
+		add di, cx
+		
+		mov ah, 3Fh
+		mov cx, 320
+		lea dx, [scrLine]
+
+		int 21h
+
+		cld
+		mov cx, 320
+		lea si, [scrLine]
+		rep movsb
+	pop cx
+
+	loop PrintBMPLoop
+
+	ret
+endp CopyBitmap
+
+
+; Loads the image from [imageName] into the screen
+; Should be called when the program is first run to continue drawing from last use
+proc LoadImage
+	call OpenFile
+	call ReadHeader
+	call ReadPalette
+	call CopyPalette
+	call CopyBitmap
+
+	ret
+endp LoadImage
+
+
+; Changes the file pointer at [filehandler] to the start of the bitmap
+; Uses an interrupt that changes the file pointer
+; The new file pointer should point 1080 bytes from the start of the file
+proc PointToStartOfImageBitmap
+	mov ah, 42h
+	mov bx, [filehandler]
+
+	mov al, 0
+
+	mov cx, 0
+	mov dx, 438h
+
+	int 21h
+
+	ret
+endp PointToStartOfImageBitmap
+
+
+; Saves a line of the screen into [filehandler]
+; The line row that should be saved should be in [lineToSave]
+proc SaveScreenLine
+	mov cx, [lineToSave]
+	mov [yToRead], cx
+	
+	mov cx, 0
+	lea bx, [readLine]
+
+SavePixelLoop:
+	push cx
+		push bx
+			mov [xToRead], cx
+			call ReadPixel
+		pop bx
+
+		mov al, [colorRead]
+		mov [bx], al
+
+		inc bx
+	pop cx
+
+	inc cx
+
+	cmp cx, 320
+	jne SavePixelLoop
+
+WritePixelsToFile:
+	mov ah, 40h
+
+	mov bx, [filehandler]
+	mov cx, 320
+
+	lea dx, [readLine]
+
+	int 21h
+
+	ret
+endp SaveScreenLine
+
+
+; Saves the current screen into [filehandler]
+proc SaveImage
+	call HideMouse
+	call PointToStartOfImageBitmap
+
+	mov cx, 200
+
+SaveScreenLineLoop:
+	push cx
+		mov [lineToSave], cx
+		call SaveScreenLine
+	pop cx
+
+	dec cx
+
+	cmp cx, 0
+	jne SaveScreenLineLoop
+
+	call DisplayMouse
+
+	ret
+endp SaveImage
 
 
 ; Displays a line
@@ -197,7 +491,7 @@ endp DisplayChar
 ; Clears the screen
 ; Displays a white area in the drawing area
 proc ClearScreen
-	mov [color], 0Fh
+	mov [color], 255
 
 	mov [startX], 0
 	mov [endX], 320
@@ -239,7 +533,7 @@ endp DisplayColors
 ; Displays the eraser
 ; Displays two blocks that make up the eraser using DisplayRectangle
 proc DisplayEraser
-	mov [color], 9
+	mov [color], 87
 
 	mov [startX], 0
 	mov [endX], 40
@@ -249,7 +543,7 @@ proc DisplayEraser
 
 	call DisplayRectangle
 
-	mov [color], 4
+	mov [color], 217
 
 	mov [startX], 0
 	mov [endX], 40
@@ -263,35 +557,45 @@ proc DisplayEraser
 endp DisplayEraser
 
 
-; Displays the title of the program in the options bar
-; The title is taken from the okpaintTitle variable, which must end with '$'
-proc DisplayTitle
-	lea bx, [okpaintTitle]
-	mov al, 3
+; Displays text in the top bar of the screen
+; The text you want to display must end with '$'
+; You should first push the address of the text and then the starting position
+proc DisplayText
+	textAddress equ [bp+6]
+	startingPlace equ [bp+4]
 
-	mov [charRow], 1
-	mov [charColor], 0Fh
+	push bp
+		mov bp, sp
 
-DisplayCharLoop:
-	mov ah, [byte ptr bx]
-	mov [char], ah
+		mov bx, textAddress
 
-	mov [charColumn], al
+		mov [charRow], 1
 
-	push bx
-		push ax
-			call DisplayChar
-		pop ax
-	pop bx
+		mov al, startingPlace
+		mov [charColor], 255
 
-	inc al
-	inc bx
+	DisplayCharLoop:
+		mov ah, [byte ptr bx]
+		mov [char], ah
 
-	cmp [byte ptr bx], '$'
-	jne DisplayCharLoop
+		mov [charColumn], al
 
-	ret
-endp DisplayTitle
+		push bx
+			push ax
+				call DisplayChar
+			pop ax
+		pop bx
+
+		inc al
+		inc bx
+
+		cmp [byte ptr bx], '$'
+		jne DisplayCharLoop
+
+	pop bp
+
+	ret 4
+endp DisplayText
 
 
 ; Displays the options bar
@@ -300,7 +604,6 @@ endp DisplayTitle
 ; 1) Escape button
 ; 2) Clear screen button
 proc DisplayOptionsBar
-	; mov [color], 7 - gray
 	mov [color], 0
 
 	mov [startX], 0
@@ -312,7 +615,7 @@ proc DisplayOptionsBar
 	call DisplayRectangle
 
 	; Escape Button
-	mov [color], 4
+	mov [color], 14
 
 	mov [startX], 5
 	mov [startY], 5
@@ -323,10 +626,19 @@ proc DisplayOptionsBar
 	call DisplayRectangle
 
 	; OKPaint Title
-	call DisplayTitle
+	push offset okpaintTitle
+	push 3
+
+	call DisplayText
+
+	; Save Button Text
+	push offset saveButtonText
+	push 33
+
+	call DisplayText
 
 	; Clear Screen Button
-	mov [color], 0Fh
+	mov [color], 246
 
 	mov [startX], 305
 	mov [startY], 5
@@ -367,7 +679,7 @@ proc SwitchColor
 	jmp Choose7
 
 Choose0:
-	mov [color], 0Fh
+	mov [color], 255
 	jmp EndSwitchColorProc
 
 Choose1:
@@ -453,6 +765,9 @@ TopPartClicked:
 	cmp cx, 305
 	jae ClearScreenClicked
 
+	cmp cx, 260
+	jae SaveImageClicked
+
 	jmp GetMouseLoop
 
 ClearScreenClicked:
@@ -467,8 +782,13 @@ ClearScreenClicked:
 
 	jmp GetMouseLoop
 
+SaveImageClicked:
+	call SaveImage
+	jmp GetMouseLoop
+
 EscapeClicked:
 	call SwitchToTextMode
+	call CloseFile
 	call Exit
 endp HandleUserInput
 
@@ -481,11 +801,12 @@ Start:
 	call WaitForKey
 	
 	call SwitchToGraphicsMode
-	call ClearScreen
+	call LoadImage
 	call DisplayOptionsBar
 	call DisplayColors
 	call DisplayEraser
 	call InitMouse
+	call DisplayMouse
 	
 	call HandleUserInput
 END Start
