@@ -51,9 +51,26 @@ DATASEG
 	charRow db 0
 	charColumn db 0
 
+	; The x and y values of the pixel you want to read the color of
+	; Used in the ReadPixel procedure
+	xToRead dw ?
+	yToRead dw ?
+
+	; The color that was returned from the ReadPixel procedure
+	colorRead db ?
+
 	; Holds the color code of the char color to be displayed
 	; Optional values are 0h - 0Fh
 	charColor db 0
+
+	; Holds a line row that should be saved into the image
+	; Used in the SaveScreenLine procedure
+	lineToSave dw ?
+
+	; Holds the line that was read from the screen
+	; Holds color indexes
+	; Used in the SaveScreenLine procedure
+	readLine db 320 dup (0)
 
 	; Holds the name of the image that is saved and loaded
 	imageName db 'image.bmp', 0
@@ -136,28 +153,60 @@ proc DisplayDot
 endp DisplayDot
 
 
-; Initializes the mouse and displays a cursor
+; Reads the color of a pixel at x=[xToRead] and y=[yToRead]
+; The color that is read is save to [colorRead]
+proc ReadPixel
+	mov bl, 0
+
+	mov cx, [xToRead]
+	mov dx, [yToRead]
+
+	mov ah, 0Dh
+	int 10h
+	
+	mov [colorRead], al
+
+	ret
+endp ReadPixel
+
+
+; Initializes the mouse
 proc InitMouse
 	mov ax, 0
-	int 33h
-
-	mov ax, 1
 	int 33h
 
 	ret
 endp InitMouse
 
 
+; Displays the cursor of the mouse
+proc DisplayMouse
+	mov ax, 1
+	int 33h
+	
+	ret
+endp DisplayMouse
+
+
+; Hides the cursor of the mouse
+proc HideMouse
+	mov ax, 2
+	int 33h
+	
+	ret
+endp HideMouse
+
+
 ; Opens the file at [imageName]
 ; The filehandler id is put at [filehandler]
 proc OpenFile
 	mov ah, 3Dh
-	xor al, al
+	mov al, 2
 	lea dx, [imageName]
 
 	int 21h
-	jc OpenError
 
+	jc OpenError
 	mov [filehandler], ax
 
 	ret
@@ -169,6 +218,17 @@ OpenError:
 
 	ret
 endp OpenFile
+
+
+; Closes the file that was opened before at [filehandler]
+; Used at exit to close the image file
+proc CloseFile
+	mov ah, 3Eh
+	mov bx, [filehandler]
+	int 21h
+
+	ret
+endp CloseFile
 
 
 ; Reads the BMP file header from [filehandler] into [header]
@@ -184,7 +244,7 @@ proc ReadHeader
 endp ReadHeader
 
 
-; Reads the BMP file header from [filehandler] into [palette]
+; Reads the BMP color palette from [filehandler] into [palette]
 proc ReadPalette
 	mov ah, 3Fh
 	mov cx, 400h
@@ -242,16 +302,16 @@ PrintBMPLoop:
 		mov di, cx
 		shl cx, 6
 		shl di, 8
-		add di,cx
+		add di, cx
 		
 		mov ah, 3Fh
 		mov cx, 320
-		lea dx,[scrLine]
+		lea dx, [scrLine]
 
 		int 21h
 
 		cld
-		mov cx,320
+		mov cx, 320
 		lea si, [scrLine]
 		rep movsb
 	pop cx
@@ -275,8 +335,85 @@ proc LoadImage
 endp LoadImage
 
 
+; Changes the file pointer at [filehandler] to the start of the bitmap
+; Uses an interrupt that changes the file pointer
+; The new file pointer should point 1080 bytes from the start of the file
+proc PointToStartOfImageBitmap
+	mov ah, 42h
+	mov bx, [filehandler]
+
+	mov al, 0
+
+	mov cx, 0
+	mov dx, 438h
+
+	int 21h
+
+	ret
+endp PointToStartOfImageBitmap
+
+
+; Saves a line of the screen into [filehandler]
+; The line row that should be saved should be in [lineToSave]
+proc SaveScreenLine
+	mov cx, [lineToSave]
+	mov [yToRead], cx
+	
+	mov cx, 0
+	lea bx, [readLine]
+
+SavePixelLoop:
+	push cx
+		push bx
+			mov [xToRead], cx
+			call ReadPixel
+		pop bx
+
+		mov al, [colorRead]
+		mov [bx], al
+
+		inc bx
+	pop cx
+
+	inc cx
+
+	cmp cx, 320
+	jne SavePixelLoop
+
+WritePixelsToFile:
+	mov ah, 40h
+
+	mov bx, [filehandler]
+	mov cx, 320
+
+	lea dx, [readLine]
+
+	int 21h
+
+	ret
+endp SaveScreenLine
+
+
 ; Saves the current screen into [filehandler]
 proc SaveImage
+	call HideMouse
+	call PointToStartOfImageBitmap
+
+	mov cx, 200
+
+SaveScreenLineLoop:
+	push cx
+		mov [lineToSave], cx
+		call SaveScreenLine
+	pop cx
+
+	dec cx
+
+	cmp cx, 0
+	jne SaveScreenLineLoop
+
+	call DisplayMouse
+
 	ret
 endp SaveImage
 
@@ -354,7 +491,7 @@ endp DisplayChar
 ; Clears the screen
 ; Displays a white area in the drawing area
 proc ClearScreen
-	mov [color], 0Fh
+	mov [color], 255
 
 	mov [startX], 0
 	mov [endX], 320
@@ -435,7 +572,7 @@ proc DisplayText
 		mov [charRow], 1
 
 		mov al, startingPlace
-		mov [charColor], 246
+		mov [charColor], 255
 
 	DisplayCharLoop:
 		mov ah, [byte ptr bx]
@@ -542,7 +679,7 @@ proc SwitchColor
 	jmp Choose7
 
 Choose0:
-	mov [color], 246
+	mov [color], 255
 	jmp EndSwitchColorProc
 
 Choose1:
@@ -651,6 +788,7 @@ SaveImageClicked:
 
 EscapeClicked:
 	call SwitchToTextMode
+	call CloseFile
 	call Exit
 endp HandleUserInput
 
@@ -668,6 +806,7 @@ Start:
 	call DisplayColors
 	call DisplayEraser
 	call InitMouse
+	call DisplayMouse
 	
 	call HandleUserInput
 END Start
